@@ -1,0 +1,134 @@
+// android/build.gradle
+
+def DEFAULT_COMPILE_SDK_VERSION = 31 // Update this as per your project's requirements
+def DEFAULT_BUILD_TOOLS_VERSION = '31.0.0' // Update this as per your project's requirements
+def DEFAULT_MIN_SDK_VERSION = 16
+def DEFAULT_TARGET_SDK_VERSION = 31 // Update this as per your project's requirements
+
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'maven-publish' // Apply the maven-publish plugin
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral() // Replace jcenter() with mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:7.2.1") // Update to a compatible Gradle version
+    }
+}
+
+android {
+    compileSdkVersion safeExtGet('compileSdkVersion', DEFAULT_COMPILE_SDK_VERSION)
+    buildToolsVersion safeExtGet('buildToolsVersion', DEFAULT_BUILD_TOOLS_VERSION)
+    defaultConfig {
+        minSdkVersion safeExtGet('minSdkVersion', DEFAULT_MIN_SDK_VERSION)
+        targetSdkVersion safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
+        versionCode 1
+        versionName "1.0"
+    }
+    lintOptions {
+        abortOnError false
+    }
+}
+
+repositories {
+    mavenLocal()
+    maven {
+        url "$rootDir/../node_modules/react-native/android"
+    }
+    maven {
+        url "$rootDir/../node_modules/jsc-android/dist"
+    }
+    google()
+    mavenCentral() // Use mavenCentral instead of jcenter
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-native:+'  // From node_modules
+    implementation 'com.rmtheis:tess-two:9.1.0' // OCR dependency
+}
+
+def configureReactNativePom(def pom) {
+    def packageJson = new groovy.json.JsonSlurper().parseText(file('../package.json').text)
+
+    pom.project {
+        name packageJson.title
+        artifactId packageJson.name
+        version = packageJson.version
+        group = "com.reactlibrary"
+        description packageJson.description
+        url packageJson.repository.baseUrl
+
+        licenses {
+            license {
+                name packageJson.license
+                url packageJson.repository.baseUrl + '/blob/master/' + packageJson.licenseFilename
+                distribution 'repo'
+            }
+        }
+
+        developers {
+            developer {
+                id packageJson.author.username
+                name packageJson.author.name
+            }
+        }
+    }
+}
+
+afterEvaluate { project ->
+    task androidJavadoc(type: Javadoc) {
+        source = android.sourceSets.main.java.srcDirs
+        classpath += files(android.bootClasspath)
+        include '**/*.java'
+    }
+
+    task androidJavadocJar(type: Jar, dependsOn: androidJavadoc) {
+        classifier = 'javadoc'
+        from androidJavadoc.destinationDir
+    }
+
+    task androidSourcesJar(type: Jar) {
+        classifier = 'sources'
+        from android.sourceSets.main.java.srcDirs
+        include '**/*.java'
+    }
+
+    android.libraryVariants.all { variant ->
+        def name = variant.name.capitalize()
+        def javaCompileTask = variant.javaCompileProvider.get()
+
+        task "jar${name}"(type: Jar, dependsOn: javaCompileTask) {
+            from javaCompileTask.destinationDir
+        }
+    }
+
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                from(components.release)
+                groupId = "com.reactlibrary"
+                artifactId = project.name
+                version = project.version
+                artifact androidSourcesJar
+                artifact androidJavadocJar
+            }
+        }
+
+        repositories {
+            maven {
+                url = uri("${projectDir}/../android/maven") // Change to your local Maven repo
+            }
+        }
+    }
+
+    artifacts {
+        archives androidSourcesJar
+        archives androidJavadocJar
+    }
+}
